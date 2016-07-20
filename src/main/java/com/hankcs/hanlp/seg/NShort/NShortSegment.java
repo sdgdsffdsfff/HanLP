@@ -128,6 +128,11 @@ public class NShortSegment extends WordBasedGenerativeModelSegment
             speechTagging(vertexList);
         }
 
+        if (config.useCustomDictionary)
+        {
+            combineByCustomDictionary(vertexList);
+        }
+
         return convert(vertexList, config.offset);
     }
 
@@ -143,7 +148,7 @@ public class NShortSegment extends WordBasedGenerativeModelSegment
     {
         List<List<Vertex>> coarseResult = new LinkedList<List<Vertex>>();
         ////////////////生成词网////////////////////
-        GenerateWordNet(sSentence, wordNetAll);
+        GenerateWordNet(wordNetAll);
 //        logger.trace("词网大小：" + wordNetAll.size());
 //        logger.trace("打印词网：\n" + wordNetAll);
         ///////////////生成词图////////////////////

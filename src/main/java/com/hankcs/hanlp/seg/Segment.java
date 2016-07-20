@@ -13,6 +13,7 @@ package com.hankcs.hanlp.seg;
 
 import com.hankcs.hanlp.HanLP;
 import com.hankcs.hanlp.collection.trie.DoubleArrayTrie;
+import com.hankcs.hanlp.collection.trie.bintrie.BaseNode;
 import com.hankcs.hanlp.corpus.tag.Nature;
 import com.hankcs.hanlp.dictionary.CoreDictionary;
 import com.hankcs.hanlp.dictionary.CustomDictionary;
@@ -193,6 +194,7 @@ public abstract class Segment
     {
         Vertex[] wordNet = new Vertex[vertexList.size()];
         vertexList.toArray(wordNet);
+        // DAT合并
         DoubleArrayTrie<CoreDictionary.Attribute> dat = CustomDictionary.dat;
         for (int i = 0; i < wordNet.length; ++i)
         {
@@ -202,8 +204,8 @@ public abstract class Segment
             {
                 int start = i;
                 int to = i + 1;
-                int end = - 1;
-                CoreDictionary.Attribute value = null;
+                int end = to;
+                CoreDictionary.Attribute value = dat.output(state);
                 for (; to < wordNet.length; ++to)
                 {
                     state = dat.transition(wordNet[to].realWord, state);
@@ -225,6 +227,45 @@ public abstract class Segment
                     }
                     wordNet[i] = new Vertex(sbTerm.toString(), value);
                     i = end - 1;
+                }
+            }
+        }
+        // BinTrie合并
+        if (CustomDictionary.trie != null)
+        {
+            for (int i = 0; i < wordNet.length; ++i)
+            {
+                if (wordNet[i] == null) continue;
+                BaseNode<CoreDictionary.Attribute> state = CustomDictionary.trie.transition(wordNet[i].realWord.toCharArray(), 0);
+                if (state != null)
+                {
+                    int start = i;
+                    int to = i + 1;
+                    int end = to;
+                    CoreDictionary.Attribute value = state.getValue();
+                    for (; to < wordNet.length; ++to)
+                    {
+                        if (wordNet[to] == null) continue;
+                        state = state.transition(wordNet[to].realWord.toCharArray(), 0);
+                        if (state == null) break;
+                        if (state.getValue() != null)
+                        {
+                            value = state.getValue();
+                            end = to + 1;
+                        }
+                    }
+                    if (value != null)
+                    {
+                        StringBuilder sbTerm = new StringBuilder();
+                        for (int j = start; j < end; ++j)
+                        {
+                            if (wordNet[j] == null) continue;
+                            sbTerm.append(wordNet[j]);
+                            wordNet[j] = null;
+                        }
+                        wordNet[i] = new Vertex(sbTerm.toString(), value);
+                        i = end - 1;
+                    }
                 }
             }
         }
@@ -258,22 +299,31 @@ public abstract class Segment
                 {
                     sbQuantifier.append(cur.realWord);
                     iterator.remove();
+                    removeFromWordNet(cur, wordNetAll, line, sbQuantifier.length());
                 }
-                if (cur != null &&
-                        (cur.hasNature(Nature.q) || cur.hasNature(Nature.qv) || cur.hasNature(Nature.qt))
-                        )
+                if (cur != null)
                 {
-                    if (config.indexMode)
+                    if ((cur.hasNature(Nature.q) || cur.hasNature(Nature.qv) || cur.hasNature(Nature.qt)))
                     {
-                        wordNetAll.add(line, new Vertex(sbQuantifier.toString(), new CoreDictionary.Attribute(Nature.m)));
+                        if (config.indexMode)
+                        {
+                            wordNetAll.add(line, new Vertex(sbQuantifier.toString(), new CoreDictionary.Attribute(Nature.m)));
+                        }
+                        sbQuantifier.append(cur.realWord);
+                        iterator.remove();
+                        removeFromWordNet(cur, wordNetAll, line, sbQuantifier.length());
                     }
-                    sbQuantifier.append(cur.realWord);
-                    pre.attribute = new CoreDictionary.Attribute(Nature.mq);
-                    iterator.remove();
+                    else
+                    {
+                        line += cur.realWord.length();   // (cur = iterator.next()).hasNature(Nature.m) 最后一个next可能不含q词性
+                    }
                 }
                 if (sbQuantifier.length() != pre.realWord.length())
                 {
                     pre.realWord = sbQuantifier.toString();
+                    pre.word = Predefine.TAG_NUMBER;
+                    pre.attribute = new CoreDictionary.Attribute(Nature.mq);
+                    pre.wordID = CoreDictionary.M_WORD_ID;
                     sbQuantifier.setLength(0);
                 }
             }
@@ -284,7 +334,32 @@ public abstract class Segment
     }
 
     /**
-     * 分词
+     * 将一个词语从词网中彻底抹除
+     * @param cur 词语
+     * @param wordNetAll 词网
+     * @param line 当前扫描的行数
+     * @param length 当前缓冲区的长度
+     */
+    private static void removeFromWordNet(Vertex cur, WordNet wordNetAll, int line, int length)
+    {
+        LinkedList<Vertex>[] vertexes = wordNetAll.getVertexes();
+        // 将其从wordNet中删除
+        for (Vertex vertex : vertexes[line + length])
+        {
+            if (vertex.from == cur)
+                vertex.from = null;
+        }
+        ListIterator<Vertex> iterator = vertexes[line + length - cur.realWord.length()].listIterator();
+        while (iterator.hasNext())
+        {
+            Vertex vertex = iterator.next();
+            if (vertex == cur) iterator.remove();
+        }
+    }
+
+    /**
+     * 分词<br>
+     * 此方法是线程安全的
      *
      * @param text 待分词文本
      * @return 单词列表
